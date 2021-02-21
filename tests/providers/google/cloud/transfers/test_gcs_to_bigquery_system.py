@@ -18,6 +18,7 @@
 
 import pytest
 
+from airflow.providers.google.cloud.example_dags.example_gcs_to_bigquery import DATASET_NAME
 from tests.providers.google.cloud.utils.gcp_authenticator import GCP_BIGQUERY_KEY
 from tests.test_utils.gcp_system_helpers import CLOUD_DAG_FOLDER, GoogleSystemTest, provide_gcp_context
 
@@ -28,3 +29,27 @@ class TestGoogleCloudStorageToBigQueryExample(GoogleSystemTest):
     @provide_gcp_context(GCP_BIGQUERY_KEY)
     def test_run_example_dag_gcs_to_bigquery_operator(self):
         self.run_dag('example_gcs_to_bigquery_operator', CLOUD_DAG_FOLDER)
+
+    @provide_gcp_context(GCP_BIGQUERY_KEY)
+    def setUp(self):
+        super().setUp()
+        cmd = [
+            'bq',
+            'mk',
+            '--dataset',
+            DATASET_NAME,
+        ]
+        self.execute_with_ctx(cmd, key=GCP_BIGQUERY_KEY)
+
+    @provide_gcp_context(GCP_BIGQUERY_KEY)
+    def tearDown(self):
+        cmd = [
+            'bq',
+            'rm',
+            '-r',
+            '-f',
+            '--dataset',
+            DATASET_NAME,
+        ]
+        self.execute_with_ctx(cmd, key=GCP_BIGQUERY_KEY)
+        super().tearDown()
