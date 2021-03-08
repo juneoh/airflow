@@ -2327,14 +2327,9 @@ class BigQueryBaseCursor(LoggingMixin):
     def create_external_table(self, *args, **kwargs) -> None:
         """
         This method is deprecated.
-        Please use `airflow.providers.google.cloud.hooks.bigquery.BigQueryHook.create_external_table`
+        Please use `BigQueryHook.create_empty_table` method with
+        pass passing the `table_resource` object. This gives more flexibility than this method.
         """
-        warnings.warn(
-            "This method is deprecated. "
-            "Please use `airflow.providers.google.cloud.hooks.bigquery.BigQueryHook.create_external_table`",
-            DeprecationWarning,
-            stacklevel=3,
-        )
         return self.hook.create_external_table(*args, **kwargs)
 
     def patch_table(self, *args, **kwargs) -> None:
@@ -2536,14 +2531,9 @@ class BigQueryBaseCursor(LoggingMixin):
     def run_load(self, *args, **kwargs) -> str:
         """
         This method is deprecated.
-        Please use `airflow.providers.google.cloud.hooks.bigquery.BigQueryHook.run_load`
+        Please use
+        `airflow.providers.google.cloud.hooks.bigquery.BigQueryHook.insert_job`
         """
-        warnings.warn(
-            "This method is deprecated. "
-            "Please use `airflow.providers.google.cloud.hooks.bigquery.BigQueryHook.run_load`",
-            DeprecationWarning,
-            stacklevel=3,
-        )
         return self.hook.run_load(*args, **kwargs)
 
     def run_copy(self, *args, **kwargs) -> str:
