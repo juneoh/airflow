@@ -19,6 +19,7 @@
 
 import json
 from typing import Optional, Sequence, Union
+import warnings
 
 from airflow.exceptions import AirflowException
 from airflow.models import BaseOperator
@@ -121,7 +122,7 @@ class GCSToBigQueryOperator(BaseOperator):
     :param src_fmt_configs: configure optional fields specific to the source format
     :type src_fmt_configs: dict
     :param external_table: Flag to specify if the destination table should be
-        a BigQuery external table. Default Value is False.
+        a BigQuery external table. (Default: ``False``).
     :type external_table: bool
     :param time_partitioning: configure optional time partitioning fields i.e.
         partition by field, type and  expiration as per API specifications.
@@ -208,6 +209,14 @@ class GCSToBigQueryOperator(BaseOperator):
     ):
 
         super().__init__(**kwargs)
+
+        if external_table:
+            warnings.warn(
+                "The external_table parameter has been deprecated. You should "
+                "use the BigQueryCreateExternalTableOperator instead.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
 
         # GCS config
         if src_fmt_configs is None:
