@@ -53,3 +53,19 @@ with models.DAG(
         dag=dag,
     )
     # [END howto_operator_gcs_to_bigquery]
+
+    create_external_table = GCSToBigQueryOperator(
+        task_id='gcs_to_bigquery_example_create_external_table',
+        bucket='cloud-samples-data',
+        source_objects=['bigquery/us-states/us-states.csv'],
+        destination_project_dataset_table=f"{DATASET_NAME}.test_external_table",
+        schema_fields=[
+            {'name': 'name', 'type': 'STRING', 'mode': 'NULLABLE'},
+            {'name': 'post_abbr', 'type': 'STRING', 'mode': 'NULLABLE'},
+        ],
+        write_disposition='WRITE_TRUNCATE',
+        external_table=True,
+        dag=dag,
+    )
+
+    load_csv >> create_external_table
