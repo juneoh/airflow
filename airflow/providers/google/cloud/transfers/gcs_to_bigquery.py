@@ -18,8 +18,15 @@
 """This module contains a Google Cloud Storage to BigQuery operator."""
 
 import json
-from typing import Optional, Sequence, Union
+from typing import List, Dict, Iterable, Optional, Sequence, Tuple, Union
 import warnings
+
+from google.cloud.bigquery import ExternalConfig, SchemaField
+from google.cloud.bigquery.table import (
+    EncryptionConfiguration,
+    Table,
+    TableReference
+)
 
 from airflow.exceptions import AirflowException
 from airflow.models import BaseOperator
@@ -259,7 +266,7 @@ class GCSToBigQueryOperator(BaseOperator):
         self.impersonation_chain = impersonation_chain
 
     def execute(self, context):
-        bq_hook = BigQueryHook(
+        self.bq_hook = BigQueryHook(
             bigquery_conn_id=self.bigquery_conn_id,
             delegate_to=self.delegate_to,
             location=self.location,
@@ -289,7 +296,7 @@ class GCSToBigQueryOperator(BaseOperator):
             schema_fields = self.schema_fields
 
         source_uris = [f'gs://{self.bucket}/{source_object}' for source_object in self.source_objects]
-        conn = bq_hook.get_conn()
+        conn = self.bq_hook.get_conn()
         cursor = conn.cursor()
 
         if self.external_table:
@@ -350,7 +357,6 @@ class GCSToBigQueryOperator(BaseOperator):
                 max_id,
             )
 
-    @GoogleBaseHook.fallback_to_default_project_id
     def create_external_table(  # pylint: disable=too-many-locals,too-many-arguments
         self,
         external_project_dataset_table: str,
@@ -371,7 +377,6 @@ class GCSToBigQueryOperator(BaseOperator):
         labels: Optional[Dict] = None,
         encryption_configuration: Optional[Dict] = None,
         location: Optional[str] = None,
-        project_id: Optional[str] = None,
     ) -> None:
         """
         Creates a new external table in the dataset with the data from Google
@@ -452,7 +457,7 @@ class GCSToBigQueryOperator(BaseOperator):
             "pass passing the `table_resource` object. This gives more flexibility than this method.",
             DeprecationWarning,
         )
-        location = location or self.location
+        location = location or self.bq_hook.location
         src_fmt_configs = src_fmt_configs or {}
         source_format = source_format.upper()
         compression = compression.upper()
@@ -489,7 +494,7 @@ class GCSToBigQueryOperator(BaseOperator):
         }
         if source_format in src_fmt_to_param_mapping.keys():
             valid_configs = src_fmt_to_configs_mapping[src_fmt_to_param_mapping[source_format]]
-            src_fmt_configs = _validate_src_fmt_configs(
+            src_fmt_configs = self._validate_src_fmt_configs(
                 source_format, src_fmt_configs, valid_configs, backward_compatibility_configs
             )
             external_config_api_repr[src_fmt_to_param_mapping[source_format]] = src_fmt_configs
@@ -502,7 +507,8 @@ class GCSToBigQueryOperator(BaseOperator):
             external_config.max_bad_records = max_bad_records
 
         # build table definition
-        table = Table(table_ref=TableReference.from_string(external_project_dataset_table, project_id))
+        table = Table(table_ref=TableReference.from_string(external_project_dataset_table,
+                                                           self.bq_hook.project_id))
         table.external_data_configuration = external_config
         if labels:
             table.labels = labels
@@ -511,8 +517,8 @@ class GCSToBigQueryOperator(BaseOperator):
             table.encryption_configuration = EncryptionConfiguration.from_api_repr(encryption_configuration)
 
         self.log.info('Creating external table: %s', external_project_dataset_table)
-        self.create_empty_table(
-            table_resource=table.to_api_repr(), project_id=project_id, location=location, exists_ok=True
+        self.bq_hook.create_empty_table(
+            table_resource=table.to_api_repr(), project_id=table.project, location=location, exists_ok=True
         )
         self.log.info('External table created successfully: %s', external_project_dataset_table)
 
@@ -625,7 +631,7 @@ class GCSToBigQueryOperator(BaseOperator):
             "This method is deprecated. Please use `BigQueryHook.insert_job` method.", DeprecationWarning
         )
 
-        if not self.project_id:
+        if not self.bq_hook.project_id:
             raise ValueError("The project_id should be set")
 
         # To provide backward compatibility
@@ -671,9 +677,9 @@ class GCSToBigQueryOperator(BaseOperator):
                 )
             )
 
-        destination_project, destination_dataset, destination_table = _split_tablename(
+        destination_project, destination_dataset, destination_table = self._split_tablename(
             table_input=destination_project_dataset_table,
-            default_project_id=self.project_id,
+            default_project_id=self.bq_hook.project_id,
             var_name='destination_project_dataset_table',
         )
 
@@ -693,7 +699,8 @@ class GCSToBigQueryOperator(BaseOperator):
             }
         }
 
-        time_partitioning = _cleanse_time_partitioning(destination_project_dataset_table, time_partitioning)
+        time_partitioning = self._cleanse_time_partitioning(destination_project_dataset_table,
+                                                            time_partitioning)
         if time_partitioning:
             configuration['load'].update({'timePartitioning': time_partitioning})
 
@@ -751,7 +758,7 @@ class GCSToBigQueryOperator(BaseOperator):
             'encoding': encoding,
         }
 
-        src_fmt_configs = _validate_src_fmt_configs(
+        src_fmt_configs = self._validate_src_fmt_configs(
             source_format, src_fmt_configs, valid_configs, backward_compatibility_configs
         )
 
@@ -760,12 +767,12 @@ class GCSToBigQueryOperator(BaseOperator):
         if allow_jagged_rows:
             configuration['load']['allowJaggedRows'] = allow_jagged_rows
 
-        job = self.insert_job(configuration=configuration, project_id=self.project_id)
-        self.running_job_id = job.job_id
+        job = self.bq_hook.insert_job(configuration=configuration,
+                                      project_id=destination_project)
         return job.job_id
 
     def _cleanse_time_partitioning(
-        destination_dataset_table: Optional[str], time_partitioning_in: Optional[Dict]
+        self, destination_dataset_table: Optional[str], time_partitioning_in: Optional[Dict]
     ) -> Dict:  # if it is a partitioned table ($ is in the table name) add partition load option
 
         if time_partitioning_in is None:
@@ -778,7 +785,7 @@ class GCSToBigQueryOperator(BaseOperator):
         return time_partitioning_out
 
     def _split_tablename(
-        table_input: str, default_project_id: str, var_name: Optional[str] = None
+        self, table_input: str, default_project_id: str, var_name: Optional[str] = None
     ) -> Tuple[str, str, str]:
 
         if '.' not in table_input:
@@ -833,7 +840,7 @@ class GCSToBigQueryOperator(BaseOperator):
 
         if project_id is None:
             if var_name is not None:
-                log.info(
+                self.log.info(
                     'Project not included in %s: %s; using project "%s"',
                     var_name,
                     table_input,
@@ -844,6 +851,7 @@ class GCSToBigQueryOperator(BaseOperator):
         return project_id, dataset_id, table_id
 
     def _validate_src_fmt_configs(
+        self,
         source_format: str,
         src_fmt_configs: dict,
         valid_configs: List[str],
